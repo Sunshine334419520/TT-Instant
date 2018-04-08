@@ -4,7 +4,7 @@
  * @Email:  guang334419520@126.com
  * @Filename: server.cpp
  * @Last modified by:   sunshine
- * @Last modified time: 2018-04-06T17:20:50+08:00
+ * @Last modified time: 2018-04-08T17:10:37+08:00
  */
 
 #include <iostream>
@@ -18,24 +18,35 @@
 #include <time.h>
 #include <arpa/inet.h>
 #include <pthread.h>
+#include <vector>
+#include <map>
+#include <fstream>
 
 const int KMaxLen = 4096;
 const char* KServHost = "127.0.0.1";
 const int KServPort = 9999;
 const int LISTENQ = 20;
+const int KUserNameMax = 12;
+const int KUserPassMax = 16;
+const int KGroupName = 12;
+const int KDataMax = 2048;
+const char* KUserInfoFileName = "userinfo";
 
 using Socket = int;
 
 pthread_mutex_t mutex;
 
+
 enum MessageFlags {
   LeftBorder = 0,
-  TextChat,
+  PrivateChat,
   AddFriend,
   DelFriend,
-  TextGroup,
+  PublicChat,
   FindNear,
   AgreeOrRefused,
+  Quit,
+  SigOut,
   RightBorder,
   SigIn = 64,
   Register,
@@ -44,21 +55,45 @@ enum MessageFlags {
 };
 
 struct RegisterSigin {
-    char username[12];
-    char password[16];
+    char user_name[KUserNameMax];
+    char password[KUserPassMax];
     MessageFlags flags;
 };
 
+struct User {
+  char user_name[KUserNameMax];
+  User(const char* s) {
+    strcpy(user_name, s);
+  }
+  User() {}
+};
+
+struct Group {
+  char group_name[KGroupName];
+  char admin_name[KGroupName];
+  std::vector<User> group_user;
+};
+
+struct Users {
+  User user;
+  char password[KUserPassMax];
+  std::vector<User> friends;
+  std::vector<Group> groups;
+};
+
+std::map<User, Users> users_info;
+
 struct Message {
-  const char* sender;
-  const char* receiver;
-  const char* data;
+  User sender;
+  User receiver;
+  char data[KDataMax];
+  char time[20];
   MessageFlags flags;
 };
 
 struct Client {
   Socket fd;
-  char* name;
+  char name[KUserNameMax];
 }client[FD_SETSIZE];
 
 inline void error_deal(const char* s)
@@ -67,29 +102,29 @@ inline void error_deal(const char* s)
   exit(-1);
 }
 
-void friend_chat(const Message& mesg);
+void private_chat(const Message& mesg);
 void friend_add(const Message& mesg);
 void friend_delete(const Message& mesg);
-void group_chat(const Message& mesg);
+void public_chat(const Message& mesg);
 void friend_agree_or_refused(const Message& mesg);
 void near_find(const Message& mesg);
 
 void (*option_fun[])(const Message& mesg) = {
-  friend_chat,
+  private_chat,
   friend_add,
   friend_delete,
-  group_chat,
+  public_chat,
   friend_agree_or_refused,
   near_find
 };
 
 
 
-int read_data(Socket sockfd)
+int read_data(Socket sockfd, const char* name)
 {
   Message mesg;
   ssize_t n;
-  if ( (n = read(sockfd, &mesg, sizeof(mesg))) > 0) {
+  if ( (n = recv(sockfd, &mesg, sizeof(mesg), 0)) > 0) {
     if (mesg.flags > LeftBorder && mesg.flags < RightBorder)
       option_fun[mesg.flags](mesg);
   }
@@ -97,9 +132,111 @@ int read_data(Socket sockfd)
   return n;
 }
 
-void friend_chat(const Message& mesg)
+void private_chat(const Message& mesg)
 {
-  // 寻找对应的账号的IP地址，发送数据
+
+  // 寻找对应的账号，发送数据
+  int i;
+  for (i = 0; i < FD_SETSIZE; ++i) {
+    if (memcmp(mesg.sender.user_name, client[i].name, KUserNameMax) == 0) {
+      if (send(client[i].fd, &mesg, strlen((char*)&mesg), 0) < 0)
+        error_deal("send error");
+      else
+        return ;
+    }
+  }
+
+  if (i == FD_SETSIZE) {
+    //好友不在线
+  }
+}
+
+void public_chat(const Message& mesg)
+{
+  Users my_user = users_info[mesg.receiver];
+  std::vector<User> group_users;
+  for (auto group : my_user.groups) {
+    if (memcmp(group.group_name, mesg.sender.user_name, KUserNameMax) == 0)
+      group_users = group.group_user;
+  }
+
+  for (auto i : group_users) {
+    for (auto j : client)
+      if (memcpy(i.user_name, j.name, KUserNameMax) == 0)
+        if (send(j.fd, &mesg, strlen((char*)&mesg), 0) < 0)
+          error_deal("public chat send error");
+  }
+}
+
+int splict(const std::string& s, size_t pos, char c, std::string& result)
+{
+  auto pos_first = s.find_first_not_of(c, pos);
+  if (pos_first == std::string::npos)
+    return -1;
+  auto pos_finish = s.find_first_of(c, pos_first);
+  if (pos_finish == std::string::npos) {
+    result =  s.substr(pos_first, s.size());
+    return s.size();
+  }
+  else {
+    result = s.substr(pos_first, pos_finish);
+    return pos_finish;
+  }
+
+}
+
+void read_user_info_file()
+{
+  char buf[512];
+  std::ifstream in(KUserInfoFileName);
+  while (in.getline(buf, 512)) {
+    std::string s = buf;
+    Users users;
+    memset(&users, 0, sizeof(users));
+    std::string result;
+    int n;
+    if ( (n = splict(s, 0, ':', result)) == -1)
+      continue;
+    memcpy(users.user.user_name, result.c_str(), result.size());
+    if ( (n = splict(s, n, ':', result)) != -1)
+      memcpy(users.password, result.c_str(), result.size());
+
+    if ( (n = splict(s, ':', n, result)) != -1) {
+      std::string cur;
+      int i = 0;
+      while (true) {
+        if ( (i = splict(result, i, ' ', cur)) == -1)
+          break;
+        else
+          users.friends.push_back(User(cur.c_str()));
+      }
+    }
+
+    if ( (n = splict(s, ':', n, result)) != -1) {
+      std::string cur;
+      Group group;
+      int i = 0;
+      while (true) {
+        if ( (i = splict(result, i, ' ', cur)) != -1) {
+          std::string cur2;
+          int j = 0;
+          if ( (j = splict(cur, j, '-', cur2)) != -1)
+            memcpy(group.group_name, cur2.c_str(), cur2.size());
+          if ( (j = splict(cur, j, '-', cur2)) != -1)
+            memcpy(group.admin_name, cur2.c_str(), cur2.size());
+          while ( (j = splict(cur, j, '-', cur2)) != -1) {
+              group.group_user.push_back(cur2.c_str());
+          }
+          users.groups.push_back(group);
+        }
+        else
+          break;
+
+      }
+    }
+
+    users_info.insert(std::make_pair(users.user, users));
+  }
 }
 
 bool sign_in(const RegisterSigin& user_info)
@@ -130,21 +267,35 @@ void* client_thread(void* arg)
       strcpy(client[i].name," ");
       pthread_exit(0);
     }
+    pthread_mutex_lock(&mutex);
     if (mesg.flags == SigIn)
       if (!sign_in(mesg)) {
         mesg.flags = AccountOrPassError;
         send(client[i].fd, (char*)&mesg, strlen((char*)&mesg), 0);
+        pthread_mutex_unlock(&mutex);
         continue;
       }
-      else
+      else {
+        pthread_mutex_unlock(&mutex);
         break;
+      }
     else if (mesg.flags == Register) {
       if (!register_account(mesg)) {
         mesg.flags = AccountError;
         send(client[i].fd, (char*)&mesg, strlen((char*)&mesg), 0);
+        pthread_mutex_unlock(&mutex);
         continue;
       }
+      else {
+        pthread_mutex_unlock(&mutex);
+        break;
+      }
     }
+  }
+
+  while (true) {
+    if (read_data(client[i].fd, client[i].name) < 0)
+      error_deal("recv error");
   }
 
 }
