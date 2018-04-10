@@ -4,7 +4,7 @@
  * @Email:  guang334419520@126.com
  * @Filename: client.cpp
  * @Last modified by:   sunshine
- * @Last modified time: 2018-04-10T21:40:57+08:00
+ * @Last modified time: 2018-04-10T21:47:23+08:00
  */
 
  #if defined(_WIN32)
@@ -134,10 +134,14 @@
 
     servaddr.sin_family = AF_INET;
     servaddr.sin_port = htons(KServPort);
-    if (inet_pton(AF_INET, KServAddr, &servaddr.sin_addr) < 0) {
-      printf("inet_pton error\n");
-      return -1;
-    }
+    #if !defined(_WIN32)
+      if (inet_pton(AF_INET, KServAddr, &servaddr.sin_addr) < 0) {
+        printf("inet_pton error\n");
+        return -1;
+      }
+    #else
+      servaddr.sin_addr.S_un.S_addr = inet_addr(KServAddr);
+    #endif
 
     if (connect(clientfd, (sockaddr*)&servaddr, sizeof(servaddr)) < 0) {
       printf("connect error\n");
