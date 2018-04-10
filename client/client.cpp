@@ -4,22 +4,27 @@
  * @Email:  guang334419520@126.com
  * @Filename: client.cpp
  * @Last modified by:   sunshine
- * @Last modified time: 2018-04-10T17:26:58+08:00
+ * @Last modified time: 2018-04-10T21:40:57+08:00
  */
 
- #ifdef _WIN32_PLATFROM_
+ #if defined(_WIN32)
   #include <winsock2.h>
   #pragma comment(lib,"ws2_32.lib")
+  #if defined(C11)
   using Socket = SOCKET;
- #else
- #include <netinet/in.h>
- #include <sys/socket.h>
- #include <sys/types.h>
- #include <sys/wait.h>
- #include <netinet/in.h>
- #include <unistd.h>
- #include <arpa/inet.h>
- using Socket = int;
+  #else
+  typedef SOCKET Socket;
+  #endif
+ #endif
+ #if defined(__APPLE__) || defined(LINUX)
+  #include <netinet/in.h>
+  #include <sys/socket.h>
+  #include <sys/types.h>
+  #include <sys/wait.h>
+  #include <netinet/in.h>
+  #include <unistd.h>
+  #include <arpa/inet.h>
+  using Socket = int;
  #endif
 
  #include <iostream>
@@ -32,7 +37,7 @@
  #include <map>
  #include <fstream>
 
- #define max(a, b) { (a) > (b) ? (a) : (b)}
+ #define max(a, b) ((a) > (b)) ? ((a) : (b)))
 
  const int KMaxLen = 4096;           // 消息Max
  const int KServPort = 9999;         // server 端口号
@@ -173,17 +178,17 @@
      strcpy(mesg.user_name, account.c_str());
      strcpy(mesg.password, password.c_str());
      mesg.flags = SigIn;
-     if (send(sockfd, &mesg, strlen((char*)&mesg), 0) < 0) {
+     if (send(sockfd, (char*)&mesg, strlen((char*)&mesg), 0) < 0) {
        std::cout << "send error" << std::endl;
        exit(-1);
      }
      Flags flags_mesg;
-     if (recv(sockfd, &flags_mesg, sizeof(flags_mesg), 0) < 0) {
+     if (recv(sockfd, (char*)&flags_mesg, sizeof(flags_mesg), 0) < 0) {
        std::cout << "recv error" << std::endl;
        exit(-1);
      }
      if (flags_mesg.flags == Succees) {
-       if (recv(sockfd, &my_user_info, sizeof(Users), 0) < 0) {
+       if (recv(sockfd, (char*)&my_user_info, sizeof(Users), 0) < 0) {
          std::cout << "recv error" << std::endl;
          exit(-1);
        }

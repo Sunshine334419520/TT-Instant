@@ -4,7 +4,7 @@
  * @Email:  guang334419520@126.com
  * @Filename: server.cpp
  * @Last modified by:   sunshine
- * @Last modified time: 2018-04-10T17:44:37+08:00
+ * @Last modified time: 2018-04-10T17:45:23+08:00
  */
 
 #include <iostream>
@@ -162,7 +162,7 @@ void friend_agree_or_refused(const Message& mesg)
 
 void near_find(const Message& mesg)
 {
-  
+
 }
 
 void private_chat(const Message& mesg)
