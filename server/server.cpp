@@ -4,7 +4,7 @@
  * @Email:  guang334419520@126.com
  * @Filename: server.cpp
  * @Last modified by:   sunshine
- * @Last modified time: 2018-04-10T17:45:23+08:00
+ * @Last modified time: 2018-04-11T22:03:13+08:00
  */
 
 #include <iostream>
@@ -30,6 +30,7 @@ const int KUserNameMax = 12;        // max len of the username
 const int KUserPassMax = 16;        // max len of the password
 const int KGroupName = 12;          // max len of the group
 const int KDataMax = 2048;          // max len of the data
+const int KBufSize = 1024;
 const char* KUserInfoFileName = "userinfo";   // file name
 
 using Socket = int;       // 方便使用
@@ -137,8 +138,13 @@ void (*option_fun[])(const Message& mesg) = {
 int read_data(Socket sockfd, const char* name)
 {
   Message mesg;
-  ssize_t n;
-  if ( (n = recv(sockfd, &mesg, sizeof(mesg), 0)) > 0) {
+  char buf[KBufSize];
+  memset(buf, 0, KBufSize);
+  memset(&mesg, 0, sizeof(mesg));
+
+  int n;
+  if ( (n = recv(sockfd, buf, KBufSize, 0)) > 0) {
+    memcpy(&mesg, buf, sizeof(mesg));
     if (mesg.flags > LeftBorder && mesg.flags < RightBorder)
       option_fun[mesg.flags](mesg);
   }
@@ -279,8 +285,9 @@ int sign_in(const RegisterSigin& user)
       return 0;
   }
 
-  if (strcmp(users_info[User(user.user_name)].password, user.password) == 0)
+  if (strcmp(users_info[User(user.user_name)].password, user.password) == 0) {
     return 1;
+  }
   else
     return -1;
 
@@ -312,14 +319,19 @@ void* client_thread(void* arg)
   int i = *((int*)arg);
   RegisterSigin mesg;
   Flags sig_mesg;
+  char rbuf[KBufSize];
+  char sbuf[KBufSize];
+  memset(rbuf, 0, KBufSize);
+  memset(sbuf, 0, KBufSize);
   while (true) {
-    if (recv(client[i].fd, &mesg, sizeof(mesg), 0) < 0) {
+    if (recv(client[i].fd, rbuf, KBufSize, 0) < 0) {
       client[i].fd = -1;
       printf("[用户]%s异常离线 \t%s\n",client[i].name,my_time());
       strcpy(client[i].name," ");
       pthread_exit(0);
     }
     pthread_mutex_lock(&mutex);
+    memcpy(&mesg, rbuf, sizeof(mesg));
     int n;
     if (mesg.flags == SigIn)
       if ((n = sign_in(mesg)) < 0) {
@@ -337,9 +349,16 @@ void* client_thread(void* arg)
         continue;
       }
       else {
+        printf("OK\n");
+        memcpy(client[i].name, mesg.user_name, strlen(mesg.user_name));
         sig_mesg.flags = Succees;
-        int len = strlen((char*)&mesg);
-        if (send(client[i].fd, (char*)&sig_mesg, len, 0) != len)
+        memcpy(sbuf, &sig_mesg, sizeof(sig_mesg));
+        if (send(client[i].fd, sbuf, sizeof(sbuf), 0) != KBufSize)
+          error_deal("error send");
+        Users user = users_info[User(client[i].name)];
+        memset(sbuf, 0, KBufSize);
+        memcpy(sbuf, &user, sizeof(user));
+        if (send(client[i].fd, sbuf, KBufSize, 0) != KBufSize)
           error_deal("error send");
         pthread_mutex_unlock(&mutex);
         break;
@@ -405,6 +424,8 @@ int main(int argc, char const *argv[]) {
     i.fd = -1;
     strcpy(i.name, " ");
   }
+
+  read_user_info_file();
 
   while (true) {
       if ( (connfd = accept(listenfd, (sockaddr*)&cliaddr,&client_len)) < 0)

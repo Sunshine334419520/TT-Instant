@@ -4,7 +4,7 @@
  * @Email:  guang334419520@126.com
  * @Filename: client.cpp
  * @Last modified by:   sunshine
- * @Last modified time: 2018-04-10T21:47:23+08:00
+ * @Last modified time: 2018-04-11T22:05:29+08:00
  */
 
  #if defined(_WIN32)
@@ -46,6 +46,7 @@
  const int KUserPassMax = 16;        // max len of the password
  const int KGroupName = 12;          // max len of the group
  const int KDataMax = 2048;          // max len of the data
+ const int KBufSize = 1024;
  const char* KServAddr = "127.0.0.1";
 
  /* 消息的类型 */
@@ -161,6 +162,7 @@
 
  bool login(Socket sockfd)
  {
+   system("clear");
    printf("             <----- 1. 登 录 ----->\n");
    printf("             <----- 2. 注 册 ----->\n");
    printf("             <----- 0. 注 册 ----->\n");
@@ -168,6 +170,8 @@
    int n;
    scanf("%d", &n);
    if (n == 1) {
+     char buf[KBufSize];
+     //memset(buf, 0, KBufSize);
      std::string account;
      std::string password;
      printf("   账户: ");
@@ -179,18 +183,23 @@
        return false;
      }
      RegisterSigin mesg;
+     memset(&mesg, 0, sizeof(mesg));
      strcpy(mesg.user_name, account.c_str());
      strcpy(mesg.password, password.c_str());
      mesg.flags = SigIn;
-     if (send(sockfd, (char*)&mesg, strlen((char*)&mesg), 0) < 0) {
+     memcpy(buf, &mesg, sizeof(mesg));
+     if (send(sockfd, buf, KBufSize, 0) < 0) {
        std::cout << "send error" << std::endl;
        exit(-1);
      }
      Flags flags_mesg;
-     if (recv(sockfd, (char*)&flags_mesg, sizeof(flags_mesg), 0) < 0) {
+     memset(&flags_mesg, 0, sizeof(flags_mesg));
+     memset(buf, 0, KBufSize);
+     if (recv(sockfd, buf, KBufSize, 0) < 0) {
        std::cout << "recv error" << std::endl;
        exit(-1);
      }
+     memcpy(&flags_mesg, buf, sizeof(flags_mesg));
      if (flags_mesg.flags == Succees) {
        if (recv(sockfd, (char*)&my_user_info, sizeof(Users), 0) < 0) {
          std::cout << "recv error" << std::endl;
@@ -222,5 +231,7 @@ bool register_account(Socket sockfd)
 
  void show_main_menu()
  {
-
+   printf("登录成功\n");
+   while(true)
+   ;
  }
