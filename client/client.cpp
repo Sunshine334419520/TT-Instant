@@ -4,7 +4,7 @@
  * @Email:  guang334419520@126.com
  * @Filename: client.cpp
  * @Last modified by:   sunshine
- * @Last modified time: 2018-04-11T22:05:29+08:00
+ * @Last modified time: 2018-04-12T12:49:54+08:00
  */
 
  #if defined(_WIN32)
@@ -37,17 +37,18 @@
  #include <map>
  #include <fstream>
 
- #define max(a, b) ((a) > (b)) ? ((a) : (b)))
+ #define max(a, b) (((a) > (b)) ? ((a) : (b)))
 
  const int KMaxLen = 4096;           // 消息Max
- const int KServPort = 9999;         // server 端口号
+ const int KServPort = 9996;         // server 端口号
  const int LISTENQ = 20;             // listenq
  const int KUserNameMax = 12;        // max len of the username
  const int KUserPassMax = 16;        // max len of the password
  const int KGroupName = 12;          // max len of the group
  const int KDataMax = 2048;          // max len of the data
  const int KBufSize = 1024;
- const char* KServAddr = "127.0.0.1";
+ //const char* KServAddr = "127.0.0.1";
+ const char* KServAddr = "120.79.204.178";
 
  /* 消息的类型 */
  enum MessageFlags {
