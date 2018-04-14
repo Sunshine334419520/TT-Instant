@@ -4,19 +4,19 @@
  * @Email:  guang334419520@126.com
  * @Filename: client.cpp
  * @Last modified by:   sunshine
- * @Last modified time: 2018-04-12T12:49:54+08:00
+ * @Last modified time: 2018-04-14T22:44:09+08:00
  */
 
  #if defined(_WIN32)
   #include <winsock2.h>
   #pragma comment(lib,"ws2_32.lib")
-  #if defined(C11)
-  using Socket = SOCKET;
+  #if __cplusplus < 201103L
+    typedef SOCKET Socket;
   #else
-  typedef SOCKET Socket;
+    using Socket = SOCKET;
   #endif
  #endif
- #if defined(__APPLE__) || defined(LINUX)
+ #if defined(__APPLE__) || defined(__linux__)
   #include <netinet/in.h>
   #include <sys/socket.h>
   #include <sys/types.h>
@@ -24,7 +24,11 @@
   #include <netinet/in.h>
   #include <unistd.h>
   #include <arpa/inet.h>
-  using Socket = int;
+  #if __cplusplus < 201103L
+    typedef int Socket;
+  #else
+    using Socket = int;
+  #endif
  #endif
 
  #include <iostream>
@@ -47,8 +51,8 @@
  const int KGroupName = 12;          // max len of the group
  const int KDataMax = 2048;          // max len of the data
  const int KBufSize = 1024;
- //const char* KServAddr = "127.0.0.1";
- const char* KServAddr = "120.79.204.178";
+ const char* KServAddr = "127.0.0.1";
+ //const char* KServAddr = "120.79.204.178";
 
  /* 消息的类型 */
  enum MessageFlags {
@@ -59,7 +63,6 @@
    PublicChat,
    FindNear,
    AgreeOrRefused,
-   Quit,
    SigOut,
    RightBorder,
    SigIn = 64,
@@ -67,8 +70,11 @@
    Succees = 127,
    AccountOrPassError,
    AccountError,
-   AgainErro
+   AgainErro,
+   Quit
  };
+
+
  // 用于 好友同意，拒绝，或者登录成功或者失败的消息结构体
  struct Flags {
    MessageFlags flags;
@@ -164,9 +170,9 @@
  bool login(Socket sockfd)
  {
    system("clear");
-   printf("             <----- 1. 登 录 ----->\n");
-   printf("             <----- 2. 注 册 ----->\n");
-   printf("             <----- 0. 注 册 ----->\n");
+   printf("             <------------------ 1. 登 录 ------------------>\n");
+   printf("             <------------------ 2. 注 册 ------------------>\n");
+   printf("             <------------------ 0. 退 出 ------------------>\n");
    printf("     请输入: ");
    int n;
    scanf("%d", &n);
@@ -175,9 +181,9 @@
      //memset(buf, 0, KBufSize);
      std::string account;
      std::string password;
-     printf("   账户: ");
+     printf("     账户: ");
      std::cin >> account;
-     printf("   密码: ");
+     printf("     密码: ");
      std::cin >> password;
      if (account.size() > KUserNameMax || password.size() > KUserPassMax) {
        std::cout << "   error : 账户或者密码太长 " << std::endl;
@@ -206,20 +212,31 @@
          std::cout << "recv error" << std::endl;
          exit(-1);
        }
+       std::cout << my_user_info.user.user_name << std::endl;
        return true;
      }
      else if (flags_mesg.flags == AccountError) {
-       std::cout << "账户或者密码错误" << std::endl;
+       std::cout << "     账户或者密码错误" << std::endl;
+
        return false;
-     } else {
-       std::cout << "账户已经登录" << std::endl;
+     } else if (flags_mesg.flags == AgainErro){
+       std::cout << "     账户已经登录" << std::endl;
        return false;
      }
    }
    else if (n == 2) {
-     register_account(sockfd);
+     return register_account(sockfd);
    }
    else {
+     RegisterSigin flags_mesg;
+     flags_mesg.flags = Quit;
+     char buf[KBufSize];
+     memset(buf, 0, KBufSize);
+     memcpy(buf, &flags_mesg, sizeof(flags_mesg));
+     if (send(sockfd, buf, KBufSize, 0) < 0) {
+       std::cout << "recv error" << std::endl;
+       exit(-1);
+     }
      exit(0);
    }
    return false;
@@ -227,12 +244,69 @@
 
 bool register_account(Socket sockfd)
 {
+  std::string account, password;
+  printf("    账号: ");
+  std::cin >> account;
+
+  printf("    密码: ");
+  std::cin >> password;
+  if (account.size() > KBufSize || account.size() < 5 ||
+      password.size() > KBufSize || password.size() < 5) {
+    return false;
+  }
+  char buf[KBufSize];
+  RegisterSigin mesg;
+  memset(buf, 0, KBufSize);
+  strcpy(mesg.user_name, account.c_str());
+  strcpy(mesg.password, password.c_str());
+  mesg.flags = Register;
+  memcpy(buf, &mesg, sizeof(mesg));
+  if (send(sockfd, buf, KBufSize, 0) < 0) {
+    std::cout << "send error" << std::endl;
+    exit(-1);
+  }
+  Flags flags_mesg;
+  memset(buf, 0, KBufSize);
+  if (recv(sockfd, buf, KBufSize, 0) < 0) {
+    std::cout << "recv error" << std::endl;
+    exit(-1);
+  }
+  memcpy(&flags_mesg, buf, sizeof(flags_mesg));
+  if (flags_mesg.flags == Succees) {
+    memset(buf, 0, KBufSize);
+    if (recv(sockfd, buf, KBufSize, 0) < 0) {
+      std::cout << "recv error" << std::endl;
+      exit(-1);
+    }
+    memcpy(&my_user_info, buf, sizeof(my_user_info));
+    std::cout << my_user_info.user.user_name << std::endl;
+    return true;
+  }
+  else if (flags_mesg.flags == AccountError) {
+    std::cout << "账户或者密码格式不对" << std::endl;
+    return false;
+  }
+
+
   return true;
 }
 
  void show_main_menu()
  {
-   printf("登录成功\n");
+   system("clear");
+   printf("              \033[31m|<-     查看好友( 'sf' or 'see friend' )     ->| \n");
+   printf("\n");
+   printf("              |<-     添加好友( 'af' or 'add friend' )     ->| \n");
+   printf("\n");
+   printf("              |<-     删除好友( 'rf' or 'remove friend' )  ->| \n");
+   printf("\n");
+   printf("              |<-     私人聊天( 'pc' or 'private chat' )   ->| \n");
+   printf("\n");
+   printf("              |<-     群组聊天( 'gc' or 'group chat' )     ->| \n");
+   printf("\n");
+   printf("              |<-     退出登录( 'q' or 'quit')             ->| \n\033[0m");
+   printf("\n");
+
    while(true)
    ;
  }
