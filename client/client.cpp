@@ -4,7 +4,7 @@
  * @Email:  guang334419520@126.com
  * @Filename: client.cpp
  * @Last modified by:   sunshine
- * @Last modified time: 2018-04-14T22:44:09+08:00
+ * @Last modified time: 2018-04-15T17:25:44+08:00
  */
 
  #if defined(_WIN32)
@@ -40,8 +40,10 @@
  #include <string>
  #include <map>
  #include <fstream>
+ #include "Hash.hpp"
 
  #define max(a, b) (((a) > (b)) ? ((a) : (b)))
+
 
  const int KMaxLen = 4096;           // 消息Max
  const int KServPort = 9996;         // server 端口号
@@ -52,6 +54,7 @@
  const int KDataMax = 2048;          // max len of the data
  const int KBufSize = 1024;
  const char* KServAddr = "127.0.0.1";
+
  //const char* KServAddr = "120.79.204.178";
 
  /* 消息的类型 */
@@ -117,11 +120,19 @@
    MessageFlags flags;
  };
 
- void str_cli(Socket sockfd);
- bool login(Socket sockfd);
- void show_main_menu();
- bool register_account(Socket sockfd);
  Users my_user_info;
+ static void str_cli(Socket sockfd);
+ static bool login(Socket sockfd);
+ static void show_main_menu();
+ static bool register_account(Socket sockfd);
+ static void show_all_friend();
+ static bool add_friend(const std::vector<std::string>&);
+ static bool remove_friend(const std::vector<std::string>&);
+ static bool private_chat(std::string);
+ static bool public_chat(std::string);
+ static void help();
+ int splict(const std::string& s, size_t pos, char c, std::string& result);
+
 
  int main(int argc, char const *argv[]) {
  #if defined(_WIN32_PLATFROM_)
@@ -160,14 +171,92 @@
    return 0;
  }
 
- void str_cli(Socket sockfd)
+ static void str_cli(Socket sockfd)
  {
    while (!login(sockfd))
     ;
    show_main_menu();
+   std::cin.ignore();
+   while (true) {
+     std::string str;
+     std::string cmd;
+     std::cout << "\033[31m     " << my_user_info.user.user_name << ">\033[0m";
+     getline(std::cin, str);
+     size_t pos = 0;
+     if (!(pos = splict(str, pos, ' ', cmd))) {
+       std::cout << "error : 格式错误" << std::endl;
+       continue;
+     }
+     switch (HashFunc(cmd.c_str())) {
+       case HashCompile("sf"):
+       case HashCompile("see friend"):
+       {
+         show_all_friend();
+         break;
+       }
+       case HashCompile("af"):
+       case HashCompile("add friend"):
+       {
+         std::vector<std::string> args;
+         std::string arg;
+         while ((pos = splict(str, pos, ' ', arg)))
+            args.push_back(arg);
+         if (args.empty()) {
+           std::cout << "error : 格式错误, 没有参数" << std::endl;
+           break;
+         }
+         add_friend(args);
+         break;
+       }
+       case HashCompile("rf"):
+       case HashCompile("remove friend"):
+       {
+         std::vector<std::string> args;
+         std::string arg;
+         while ((pos = splict(str, pos, ' ', arg)))
+            args.push_back(arg);
+         if (args.empty()) {
+           std::cout << "error : 格式错误, 没有参数" << std::endl;
+           break;
+         }
+         remove_friend(args);
+         break;
+       }
+       case HashCompile("pc"):
+       case HashCompile("private chat"):
+       {
+         std::string arg;
+         if ( !(splict(str, pos, ' ', arg))) {
+           std::cout << "error : 格式错误, 没有参数" << std::endl;
+           break;
+         }
+         private_chat(arg);
+       }
+       case HashCompile("gc"):
+       case HashCompile("group chat"):
+       {
+         std::string arg;
+         if ( !(splict(str, pos, ' ', arg))) {
+           std::cout << "error : 格式错误, 没有参数" << std::endl;
+           break;
+         }
+         public_chat(arg);
+       }
+       case HashCompile("help"):
+       {
+         help();
+         break;
+       }
+       default:
+       {
+         std::cout << " error : 没有这个命令" << std::endl;
+       }
+     }
+   }
+
  }
 
- bool login(Socket sockfd)
+ static bool login(Socket sockfd)
  {
    system("clear");
    printf("             <------------------ 1. 登 录 ------------------>\n");
@@ -242,7 +331,7 @@
    return false;
  }
 
-bool register_account(Socket sockfd)
+static bool register_account(Socket sockfd)
 {
   std::string account, password;
   printf("    账号: ");
@@ -291,7 +380,7 @@ bool register_account(Socket sockfd)
   return true;
 }
 
- void show_main_menu()
+ static void show_main_menu()
  {
    system("clear");
    printf("              \033[31m|<-     查看好友( 'sf' or 'see friend' )     ->| \n");
@@ -306,7 +395,50 @@ bool register_account(Socket sockfd)
    printf("\n");
    printf("              |<-     退出登录( 'q' or 'quit')             ->| \n\033[0m");
    printf("\n");
+ }
 
-   while(true)
-   ;
+ static void show_all_friend()
+ {
+   printf("sf");
+ }
+
+ static bool add_friend(const std::vector<std::string>& args)
+ {
+   printf("af");
+   return true;
+ }
+
+ static bool remove_friend(const std::vector<std::string>& args)
+ {
+   return true;
+ }
+
+ static bool private_chat(std::string)
+ {
+   return true;
+ }
+ static bool public_chat(std::string)
+ {
+   return true;
+ }
+ static void help()
+ {
+
+ }
+
+ int splict(const std::string& s, size_t pos, char c, std::string& result)
+ {
+   auto pos_first = s.find_first_not_of(c, pos);
+   if (pos_first == std::string::npos)
+     return 0;
+   auto pos_finish = s.find_first_of(c, pos_first);
+   if (pos_finish == std::string::npos) {
+     result =  s.substr(pos_first, s.size());
+     return s.size();
+   }
+   else {
+     result = s.substr(pos_first, pos_finish);
+     return pos_finish;
+   }
+
  }
