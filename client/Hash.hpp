@@ -5,8 +5,11 @@
  * @Email:  guang334419520@126.com
  * @Filename: Hash.hpp
  * @Last modified by:   sunshine
- * @Last modified time: 2018-04-15T17:04:35+08:00
+ * @Last modified time: 2018-04-16T12:15:37+08:00
  */
+#ifndef __HASH_HPP
+#define __HASH_HPP
+
 #include <string>
 typedef std::uint64_t hash_t;
 
@@ -54,3 +57,5 @@ constexpr hash_t HashCompile(const char* str, hash_t last_value = 0)
 {
   return *str ? HashCompile(str + 1, last_value*5 + *str) : last_value;
 }
+
+#endif

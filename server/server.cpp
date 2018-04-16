@@ -4,7 +4,7 @@
  * @Email:  guang334419520@126.com
  * @Filename: server.cpp
  * @Last modified by:   sunshine
- * @Last modified time: 2018-04-14T22:09:31+08:00
+ * @Last modified time: 2018-04-16T18:31:20+08:00
  */
 
 #include <iostream>
@@ -32,13 +32,11 @@ const int KUserNameMax = 12;        // max len of the username
 const int KUserPassMax = 16;        // max len of the password
 const int KGroupName = 12;          // max len of the group
 const int KDataMax = 2048;          // max len of the data
-const int KBufSize = 1024;
+const int KBufSize = 4096;
 const char* KUserInfoFileName = "userinfo";   // file name
 
 using Socket = int;       // 方便使用
 
-pthread_mutex_t mutex;      //互斥量，多线程所需 用来管理client
-pthread_rwlock_t user_info_lock;
 
 
 /* 消息的类型 */
@@ -109,19 +107,6 @@ struct Users {
 };
 
 
-template <>
-struct std::hash<User> {
-  size_t operator()(const User& x) const
-  {
-    unsigned long h = 0;
-    size_t len = strlen(x.user_name);
-    for (size_t i = 0; i < len; i++) {
-      h = 5 * h + x.user_name[i];
-    }
-    return (size_t)h;
-  }
-};
-
 /*
 struct less {
   bool operator()(const User& x, const User& y) const
@@ -130,16 +115,13 @@ struct less {
   }
 };
 */
-//全局变量 用来保存所有用户的信息 这里第一个类型必须是string，如果是User会导致find时出现bug，如果是const char*
-//会导致char[] 与 char*比较出现异常
-std::map<std::string, Users> users_info;
 //hash_map<int, int> s;
 /* 消息结构体 */
 struct Message {
   User sender;
   User receiver;
   char data[KDataMax];
-  char time[20];
+  char time[30];
   MessageFlags flags;
 };
 
@@ -148,6 +130,12 @@ struct Client {
   Socket fd;
   char name[KUserNameMax];
 }client[FD_SETSIZE];
+
+pthread_mutex_t mutex;      //互斥量，多线程所需 用来管理client
+pthread_rwlock_t user_info_lock;
+//全局变量 用来保存所有用户的信息 这里第一个类型必须是string，如果是User会导致find时出现bug，如果是const char*
+//会导致char[] 与 char*比较出现异常
+std::map<std::string, Users> users_info;
 
 inline void error_deal(const char* s)     // 错误处理函数
 {
@@ -161,9 +149,11 @@ void friend_delete(const Message& mesg);    // 删除好友
 void public_chat(const Message& mesg);      // 群聊
 void friend_agree_or_refused(const Message& mesg); //同意或者拒绝好友申请
 void near_find(const Message& mesg);        // 附近的人
+void left_border(const Message& mesg);
 
 /* 函数指针数组 ， 用来保存各个消息类型所需的处理函数 */
 void (*option_fun[])(const Message& mesg) = {
+  left_border,
   private_chat,
   friend_add,
   friend_delete,
@@ -172,7 +162,10 @@ void (*option_fun[])(const Message& mesg) = {
   near_find
 };
 
+void left_border(const Message& mesg)
+{
 
+}
 
 int read_data(Socket sockfd, const char* name)
 {
@@ -184,6 +177,7 @@ int read_data(Socket sockfd, const char* name)
   int n;
   if ( (n = recv(sockfd, buf, KBufSize, 0)) > 0) {
     memcpy(&mesg, buf, sizeof(mesg));
+    std::cout << mesg.flags << std::endl;
     if (mesg.flags > LeftBorder && mesg.flags < RightBorder)
       option_fun[mesg.flags](mesg);
   }
@@ -193,7 +187,17 @@ int read_data(Socket sockfd, const char* name)
 
 void friend_add(const Message& mesg)
 {
+  char sbuf[KBufSize];
+  memset(sbuf, 0, KBufSize);
+  memcpy(sbuf, &mesg, sizeof(mesg));
+  for (auto i : client) {
 
+    if (strcmp(i.name, mesg.receiver.user_name) == 0) {
+      if (send(i.fd, sbuf, KBufSize, 0) < 0) {
+        error_deal("send error");
+      }
+    }
+  }
 }
 void friend_delete(const Message& mesg)
 {
@@ -361,7 +365,6 @@ bool sign_in(const RegisterSigin& regist_info, int i)
   //memset(sbuf, 0, KBufSize);
   for (auto c : client) {
     if (strcmp(c.name, regist_info.user_name) == 0) {
-      printf("No 2");
       sig_mesg.flags = AgainErro;
       memcpy(sbuf, &sig_mesg, sizeof(sig_mesg));
       if (send(client[i].fd, sbuf, KBufSize, 0) < 0)
@@ -373,7 +376,6 @@ bool sign_in(const RegisterSigin& regist_info, int i)
   pthread_rwlock_rdlock(&user_info_lock);
   if (strcmp(users_info[regist_info.user_name].password,
       regist_info.password) == 0) {
-    printf("OK");
     pthread_rwlock_unlock(&user_info_lock);
     pthread_mutex_lock(&mutex);
     memcpy(client[i].name, regist_info.user_name,
@@ -391,7 +393,6 @@ bool sign_in(const RegisterSigin& regist_info, int i)
     return true;
   }
   else {
-    printf("No 1");
     sig_mesg.flags = AccountOrPassError;
     memcpy(sbuf, &sig_mesg, sizeof(sig_mesg));
     if (send(client[i].fd, sbuf, KBufSize, 0) < 0)
@@ -514,11 +515,7 @@ void* client_thread(void* arg)
 
 void sig_int(int signo)
 {
-  for (auto u : users_info) {
-    std::cout << u.first << "->" << u.second.password << std::endl;
-  }
   save();
-  printf("sig int");
   exit(0);
 }
 
@@ -561,9 +558,7 @@ int main(int argc, char const *argv[]) {
   }
 
   read_user_info_file();
-  for (auto i : users_info) {
-    std::cout << i.first << "->" << i.second.password << std::endl;
-  }
+
 
   while (true) {
       if ( (connfd = accept(listenfd, (sockaddr*)&cliaddr,&client_len)) < 0)

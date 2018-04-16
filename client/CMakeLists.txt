@@ -1,3 +1,12 @@
+@Author: YangGuang <sunshine>
+@Date:   2018-04-16T11:37:36+08:00
+@Email:  guang334419520@126.com
+@Filename: CMakeLists.txt
+@Last modified by:   sunshine
+@Last modified time: 2018-04-16T12:26:42+08:00
+
+
+
 # 支持的最低版本
 cmake_minimum_required(VERSION 2.6)
 cmake_policy(SET CMP0012 NEW)

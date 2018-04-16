@@ -4,138 +4,24 @@
  * @Email:  guang334419520@126.com
  * @Filename: client.cpp
  * @Last modified by:   sunshine
- * @Last modified time: 2018-04-15T17:25:44+08:00
+ * @Last modified time: 2018-04-16T18:48:44+08:00
  */
 
- #if defined(_WIN32)
-  #include <winsock2.h>
-  #pragma comment(lib,"ws2_32.lib")
-  #if __cplusplus < 201103L
-    typedef SOCKET Socket;
-  #else
-    using Socket = SOCKET;
-  #endif
- #endif
- #if defined(__APPLE__) || defined(__linux__)
-  #include <netinet/in.h>
-  #include <sys/socket.h>
-  #include <sys/types.h>
-  #include <sys/wait.h>
-  #include <netinet/in.h>
-  #include <unistd.h>
-  #include <arpa/inet.h>
-  #if __cplusplus < 201103L
-    typedef int Socket;
-  #else
-    using Socket = int;
-  #endif
- #endif
 
  #include <iostream>
  #include <stdlib.h>
  #include <stdio.h>
- #include <cstring>
  #include <time.h>
- #include <vector>
- #include <string>
- #include <map>
  #include <fstream>
+ #include <pthread.h>
+ #include "client.hpp"
  #include "Hash.hpp"
 
- #define max(a, b) (((a) > (b)) ? ((a) : (b)))
 
-
- const int KMaxLen = 4096;           // 消息Max
- const int KServPort = 9996;         // server 端口号
- const int LISTENQ = 20;             // listenq
- const int KUserNameMax = 12;        // max len of the username
- const int KUserPassMax = 16;        // max len of the password
- const int KGroupName = 12;          // max len of the group
- const int KDataMax = 2048;          // max len of the data
- const int KBufSize = 1024;
- const char* KServAddr = "127.0.0.1";
-
- //const char* KServAddr = "120.79.204.178";
-
- /* 消息的类型 */
- enum MessageFlags {
-   LeftBorder = 0,
-   PrivateChat,
-   AddFriend,
-   DelFriend,
-   PublicChat,
-   FindNear,
-   AgreeOrRefused,
-   SigOut,
-   RightBorder,
-   SigIn = 64,
-   Register,
-   Succees = 127,
-   AccountOrPassError,
-   AccountError,
-   AgainErro,
-   Quit
- };
-
-
- // 用于 好友同意，拒绝，或者登录成功或者失败的消息结构体
- struct Flags {
-   MessageFlags flags;
- };
-
- /* 注册账号 结构 */
- struct RegisterSigin {
-     char user_name[KUserNameMax];
-     char password[KUserPassMax];
-     MessageFlags flags;
- };
- /* 用户账户信息 */
- struct User {
-   char user_name[KUserNameMax];
-   User(const char* s) {
-     strcpy(user_name, s);
-   }
-   User() {}
- };
- /* 群组结构 */
- struct Group {
-   char group_name[KGroupName];
-   char admin_name[KGroupName];
-   std::vector<User> group_user;   //群成员
- };
- /* 用户所有信息 */
- struct Users {
-   User user;      //用户账户
-   char password[KUserPassMax];
-   std::vector<User> friends;      // 好友
-   std::vector<Group> groups;      // 群组
- };
-
- /* 消息结构体 */
- struct Message {
-   User sender;
-   User receiver;
-   char data[KDataMax];
-   char time[20];
-   MessageFlags flags;
- };
-
- Users my_user_info;
- static void str_cli(Socket sockfd);
- static bool login(Socket sockfd);
- static void show_main_menu();
- static bool register_account(Socket sockfd);
- static void show_all_friend();
- static bool add_friend(const std::vector<std::string>&);
- static bool remove_friend(const std::vector<std::string>&);
- static bool private_chat(std::string);
- static bool public_chat(std::string);
- static void help();
- int splict(const std::string& s, size_t pos, char c, std::string& result);
 
 
  int main(int argc, char const *argv[]) {
- #if defined(_WIN32_PLATFROM_)
+ #if defined(_WIN32)
     WORD sock_version = MAKEWORD(2, 2);
     WSADATA wsaData;
     if (WSAStartup(sock_version, &wsaData) != 0) {
@@ -175,27 +61,37 @@
  {
    while (!login(sockfd))
     ;
+   pthread_mutex_init(&mutex, NULL);
+   pthread_cond_init(&cond, NULL);
+   pthread_t tid;
+   pthread_create(&tid, NULL, receiv_message_thread, (void*)&sockfd);
+
    show_main_menu();
    std::cin.ignore();
    while (true) {
      std::string str;
      std::string cmd;
      std::cout << "\033[31m     " << my_user_info.user.user_name << ">\033[0m";
+     pthread_mutex_lock(&mutex);
+     while (!status) {
+       pthread_cond_wait(&cond, &mutex);
+     }
+     pthread_mutex_unlock(&mutex);
      getline(std::cin, str);
      size_t pos = 0;
      if (!(pos = splict(str, pos, ' ', cmd))) {
-       std::cout << "error : 格式错误" << std::endl;
+       //std::cout << "error : 格式错误" << std::endl;
        continue;
      }
      switch (HashFunc(cmd.c_str())) {
        case HashCompile("sf"):
-       case HashCompile("see friend"):
+       case HashCompile("seefriend"):
        {
          show_all_friend();
          break;
        }
        case HashCompile("af"):
-       case HashCompile("add friend"):
+       case HashCompile("add"):
        {
          std::vector<std::string> args;
          std::string arg;
@@ -205,11 +101,11 @@
            std::cout << "error : 格式错误, 没有参数" << std::endl;
            break;
          }
-         add_friend(args);
+         add_friend(sockfd, args);
          break;
        }
        case HashCompile("rf"):
-       case HashCompile("remove friend"):
+       case HashCompile("remove"):
        {
          std::vector<std::string> args;
          std::string arg;
@@ -219,32 +115,41 @@
            std::cout << "error : 格式错误, 没有参数" << std::endl;
            break;
          }
-         remove_friend(args);
+         remove_friend(sockfd, args);
          break;
        }
        case HashCompile("pc"):
-       case HashCompile("private chat"):
+       case HashCompile("private"):
        {
          std::string arg;
          if ( !(splict(str, pos, ' ', arg))) {
            std::cout << "error : 格式错误, 没有参数" << std::endl;
            break;
          }
-         private_chat(arg);
+         private_chat(sockfd, arg);
        }
        case HashCompile("gc"):
-       case HashCompile("group chat"):
+       case HashCompile("group"):
        {
          std::string arg;
          if ( !(splict(str, pos, ' ', arg))) {
            std::cout << "error : 格式错误, 没有参数" << std::endl;
            break;
          }
-         public_chat(arg);
+         public_chat(sockfd, arg);
        }
        case HashCompile("help"):
        {
          help();
+         break;
+       }
+       case HashCompile("quit"):
+       {
+         quit();
+         break;
+       }
+       case HashCompile("\n"):
+       {
          break;
        }
        default:
@@ -256,12 +161,59 @@
 
  }
 
+ void* receiv_message_thread(void* arg)
+ {
+   Socket sockfd = *((Socket*)arg);
+   char rbuf[KBufSize];
+   while (true) {
+     memset(rbuf, 0, KBufSize);
+     if (recv(sockfd, rbuf, KBufSize, 0) < 0) {
+       quit();
+     }
+     Message mesg;
+     memcpy(&mesg, rbuf, sizeof(mesg));
+     switch(mesg.flags) {
+       case AddFriend:
+       {
+         std::cout << "\n         您收到一条来自" << mesg.sender.user_name << "的好友申请"
+                   << "time : " << mesg.time;
+         messages.push_back(mesg);
+         break;
+       }
+       case PrivateChat:
+       {
+         std::cout << "\n         您收到一条来自" << mesg.sender.user_name << "的消息"
+                   << "time : " << mesg.time;
+         messages.push_back(mesg);
+         break;
+       }
+       case PublicChat:
+       {
+         std::cout << "\n         您收到一条来自" << mesg.sender.user_name << "的群消息"
+                   << "time : " << mesg.time;
+         messages.push_back(mesg);
+         break;
+       }
+       default:
+       {
+         break;
+       }
+
+     }
+   }
+ }
+
+ static void quit()
+ {
+
+ }
+
  static bool login(Socket sockfd)
  {
    system("clear");
-   printf("             <------------------ 1. 登 录 ------------------>\n");
-   printf("             <------------------ 2. 注 册 ------------------>\n");
-   printf("             <------------------ 0. 退 出 ------------------>\n");
+   printf("             <------------ 1. 登 录 ------------>\n");
+   printf("             <------------ 2. 注 册 ------------>\n");
+   printf("             <------------ 0. 退 出 ------------>\n");
    printf("     请输入: ");
    int n;
    scanf("%d", &n);
@@ -380,65 +332,102 @@ static bool register_account(Socket sockfd)
   return true;
 }
 
- static void show_main_menu()
- {
-   system("clear");
-   printf("              \033[31m|<-     查看好友( 'sf' or 'see friend' )     ->| \n");
-   printf("\n");
-   printf("              |<-     添加好友( 'af' or 'add friend' )     ->| \n");
-   printf("\n");
-   printf("              |<-     删除好友( 'rf' or 'remove friend' )  ->| \n");
-   printf("\n");
-   printf("              |<-     私人聊天( 'pc' or 'private chat' )   ->| \n");
-   printf("\n");
-   printf("              |<-     群组聊天( 'gc' or 'group chat' )     ->| \n");
-   printf("\n");
-   printf("              |<-     退出登录( 'q' or 'quit')             ->| \n\033[0m");
-   printf("\n");
- }
+static void show_main_menu()
+{
+  system("clear");
+  printf("              \033[31m|<-     查看好友( 'vf' or 'viewfriend' )    ->| \n");
+  printf("\n");
+  printf("              |<-     添加好友( 'af' or 'add' )           ->| \n");
+  printf("\n");
+  printf("              |<-     删除好友( 'rf' or 'remove' )        ->| \n");
+  printf("\n");
+  printf("              |<-     私人聊天( 'pc' or 'private' )       ->| \n");
+  printf("\n");
+  printf("              |<-     群组聊天( 'gc' or 'group' )         ->| \n");
+  printf("\n");
+  printf("              |<-     查看消息( 'vm' or 'viewmesg' )         ->| \n");
+  printf("\n");
+  printf("              |<-     退出登录( 'q' or 'quit')            ->| \n\033[0m");
+  printf("\n");
+}
 
- static void show_all_friend()
- {
-   printf("sf");
- }
+static void show_all_friend()
+{
+  printf("sf");
+}
 
- static bool add_friend(const std::vector<std::string>& args)
- {
-   printf("af");
-   return true;
- }
+static bool add_friend(Socket sockfd, const std::vector<std::string>& args)
+{
+  char sbuf[KBufSize];
+  memset(sbuf, 0, KBufSize);
+  Message mesg;
+  memset(&mesg, 0, sizeof(mesg));
+  mesg.sender = my_user_info.user;
+  mesg.flags = AddFriend;
 
- static bool remove_friend(const std::vector<std::string>& args)
- {
-   return true;
- }
+  for (auto arg : args) {
+    mesg.receiver = User(arg.c_str());
+    std::cout << mesg.receiver.user_name << std::endl;
+    char* t = my_time();
+    memcpy(mesg.time, t, strlen(t));
+    memcpy(sbuf, &mesg, sizeof(mesg));
+    if (send(sockfd, sbuf, KBufSize, 0) < 0)
+      quit();
+  }
 
- static bool private_chat(std::string)
- {
-   return true;
- }
- static bool public_chat(std::string)
- {
-   return true;
- }
- static void help()
- {
+  return true;
+}
 
- }
+static bool remove_friend(Socket sockfd, const std::vector<std::string>& args)
+{
+  char sbuf[KBufSize];
+  Message mesg;
+  mesg.sender = my_user_info.user;
+  mesg.flags = AddFriend;
 
- int splict(const std::string& s, size_t pos, char c, std::string& result)
- {
-   auto pos_first = s.find_first_not_of(c, pos);
-   if (pos_first == std::string::npos)
-     return 0;
-   auto pos_finish = s.find_first_of(c, pos_first);
-   if (pos_finish == std::string::npos) {
-     result =  s.substr(pos_first, s.size());
-     return s.size();
-   }
-   else {
-     result = s.substr(pos_first, pos_finish);
-     return pos_finish;
-   }
+  for (auto arg : args) {
+    mesg.receiver = User(arg.c_str());
+    char* t = my_time();
+    memcpy(mesg.time, t, strlen(t));
+    memcpy(sbuf, &mesg, sizeof(mesg));
+    if (send(sockfd, sbuf, strlen(sbuf), 0) < 0)
+      quit();
+  }
+  return true;
+}
 
- }
+static bool private_chat(Socket sockfd, const std::string& arg)
+{
+  return true;
+}
+static bool public_chat(Socket sockfd, const std::string& arg)
+{
+  return true;
+}
+
+static void view_message()
+{
+
+}
+
+static void help()
+{
+
+}
+
+int splict(const std::string& s, size_t pos, char c, std::string& result)
+{
+  auto pos_first = s.find_first_not_of(c, pos);
+  if (pos_first == std::string::npos)
+  return 0;
+  auto pos_finish = s.find_first_of(c, pos_first);
+  if (pos_finish == std::string::npos) {
+    result =  s.substr(pos_first, s.size());
+    return s.size();
+  }
+  else {
+    result = s.substr(pos_first, pos_finish);
+    return pos_finish;
+  }
+
+}
