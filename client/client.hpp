@@ -4,7 +4,7 @@
  * @Email:  guang334419520@126.com
  * @Filename: client.hpp
  * @Last modified by:   sunshine
- * @Last modified time: 2018-04-16T18:10:53+08:00
+ * @Last modified time: 2018-05-05T16:40:53+08:00
  */
 
 #ifndef __CLIENT_HPP
@@ -61,7 +61,9 @@ enum MessageFlags {
   DelFriend,
   PublicChat,
   FindNear,
-  AgreeOrRefused,
+  Agree,
+  Refuse,
+  Quit,
   SigOut,
   RightBorder,
   SigIn = 64,
@@ -70,7 +72,6 @@ enum MessageFlags {
   AccountOrPassError,
   AccountError,
   AgainErro,
-  Quit
 };
 
 
@@ -118,6 +119,7 @@ struct Message {
 
 Users my_user_info;
 std::vector<Message> messages;    // 接收到的消息结构体
+std::vector<Message> request_friend;  //好友申请信息
 pthread_mutex_t mutex;
 pthread_cond_t cond;
 int status = KRun;
@@ -132,8 +134,9 @@ static bool private_chat(Socket, const std::string&);
 static bool public_chat(Socket, const std::string&);
 static void view_message();
 static void help();
-static void quit();
-void* receiv_message_thread(void* arg);
+static void quit(Socket sockfd);
+static void request_message_deal(Socket sockfd);
+void receiv_message_thread(int arg);
 int splict(const std::string& s, size_t pos, char c, std::string& result);
 
 inline char* my_time()

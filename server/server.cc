@@ -4,7 +4,7 @@
  * @Email:  guang334419520@126.com
  * @Filename: server.cpp
  * @Last modified by:   sunshine
- * @Last modified time: 2018-04-16T18:31:20+08:00
+ * @Last modified time: 2018-05-05T17:57:17+08:00
  */
 
 #include <iostream>
@@ -25,7 +25,7 @@
 #include <fstream>
 
 
-const int KMaxLen = 4096;           // 消息Max
+const int KMaxLen =4096;           // 消息Max
 const int KServPort = 9996;         // 端口号
 const int LISTENQ = 20;             // listenq
 const int KUserNameMax = 12;        // max len of the username
@@ -47,7 +47,9 @@ enum MessageFlags {
   DelFriend,
   PublicChat,
   FindNear,
-  AgreeOrRefused,
+  Agree,
+  Refuse,
+  Quit,
   SigOut,
   RightBorder,
   SigIn = 64,
@@ -56,7 +58,6 @@ enum MessageFlags {
   AccountOrPassError,
   AccountError,
   AgainErro,
-  Quit
 };
 // 用于 好友同意，拒绝，或者登录成功或者失败的消息结构体
 struct Flags {
@@ -150,6 +151,11 @@ void public_chat(const Message& mesg);      // 群聊
 void friend_agree_or_refused(const Message& mesg); //同意或者拒绝好友申请
 void near_find(const Message& mesg);        // 附近的人
 void left_border(const Message& mesg);
+void friend_agree(const Message& mesg);
+void friend_refuse(const Message& mesg);
+void user_quit(const Message& mesg);
+
+char* my_time();
 
 /* 函数指针数组 ， 用来保存各个消息类型所需的处理函数 */
 void (*option_fun[])(const Message& mesg) = {
@@ -158,8 +164,10 @@ void (*option_fun[])(const Message& mesg) = {
   friend_add,
   friend_delete,
   public_chat,
-  friend_agree_or_refused,
-  near_find
+  near_find,
+  friend_agree,
+  friend_refuse,
+  user_quit
 };
 
 void left_border(const Message& mesg)
@@ -199,12 +207,32 @@ void friend_add(const Message& mesg)
     }
   }
 }
-void friend_delete(const Message& mesg)
-{
 
+void friend_agree(const Message& mesg)
+{
+  friend_refuse(mesg);
+  pthread_rwlock_wrlock(&user_info_lock);
+  users_info[mesg.sender.user_name].friends.push_back(mesg.receiver);
+  users_info[mesg.receiver.user_name].friends.push_back(mesg.sender);
+  pthread_rwlock_unlock(&user_info_lock);
 }
 
-void friend_agree_or_refused(const Message& mesg)
+void friend_refuse(const Message& mesg)
+{
+  char sbuf[KBufSize];
+  memset(sbuf, 0, KBufSize);
+  memcpy(sbuf, &mesg, sizeof(mesg));
+  for (auto i : client) {
+
+    if (strcmp(i.name, mesg.receiver.user_name) == 0) {
+      if (send(i.fd, sbuf, KBufSize, 0) < 0) {
+        error_deal("send error");
+      }
+    }
+  }
+}
+
+void friend_delete(const Message& mesg)
 {
 
 }
@@ -250,6 +278,22 @@ void public_chat(const Message& mesg)
   }
 }
 
+
+void user_quit(const Message& mesg)
+{
+  for (auto& i : client) {
+
+    if (strcmp(i.name, mesg.receiver.user_name) == 0) {
+      pthread_mutex_lock(&mutex);
+      i.fd = -1;
+      strcpy(i.name, " ");
+      printf("客户端退出 \t%s\n",my_time());
+      pthread_mutex_unlock(&mutex);
+      pthread_exit(0);
+    }
+  }
+}
+
 int splict(const std::string& s, size_t pos, char c, std::string& result)
 {
   auto pos_first = s.find_first_not_of(c, pos);
@@ -261,7 +305,7 @@ int splict(const std::string& s, size_t pos, char c, std::string& result)
     return s.size();
   }
   else {
-    result = s.substr(pos_first, pos_finish);
+    result = s.substr(pos_first, pos_finish - pos_first);
     return pos_finish;
   }
 
@@ -283,7 +327,7 @@ void read_user_info_file()
     if ( (n = splict(s, n, ':', result)) != -1)
       memcpy(users.password, result.c_str(), result.size());
 
-    if ( (n = splict(s, ':', n, result)) != -1) {
+    if ( (n = splict(s, n, ':', result)) != -1) {
       std::string cur;
       int i = 0;
       while (true) {
@@ -294,7 +338,7 @@ void read_user_info_file()
       }
     }
 
-    if ( (n = splict(s, ':', n, result)) != -1) {
+    if ( (n = splict(s, n, ':', result)) != -1) {
       std::string cur;
       Group group;
       int i = 0;
@@ -558,6 +602,12 @@ int main(int argc, char const *argv[]) {
   }
 
   read_user_info_file();
+
+  for (auto it = users_info.begin(); it != users_info.end(); ++it) {
+    std::cout << it->first <<  "  " << it->second.password << std::endl;
+    for (auto f : it->second.friends)
+      std::cout << f.user_name << std::endl;
+  }
 
 
   while (true) {

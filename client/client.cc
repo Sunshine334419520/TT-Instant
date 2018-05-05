@@ -4,7 +4,7 @@
  * @Email:  guang334419520@126.com
  * @Filename: client.cpp
  * @Last modified by:   sunshine
- * @Last modified time: 2018-04-16T18:48:44+08:00
+ * @Last modified time: 2018-05-05T17:46:20+08:00
  */
 
 
@@ -13,9 +13,13 @@
  #include <stdio.h>
  #include <time.h>
  #include <fstream>
- #include <pthread.h>
+ #include <thread>
+ #include <condition_variable>
  #include "client.hpp"
  #include "Hash.hpp"
+
+ //std::condition_variable_any m_t;
+ std::mutex lock;
 
 
 
@@ -57,26 +61,20 @@
    return 0;
  }
 
+
+
  static void str_cli(Socket sockfd)
  {
    while (!login(sockfd))
     ;
-   pthread_mutex_init(&mutex, NULL);
-   pthread_cond_init(&cond, NULL);
-   pthread_t tid;
-   pthread_create(&tid, NULL, receiv_message_thread, (void*)&sockfd);
 
+   std::thread tr(receiv_message_thread, sockfd);
    show_main_menu();
    std::cin.ignore();
    while (true) {
      std::string str;
      std::string cmd;
      std::cout << "\033[31m     " << my_user_info.user.user_name << ">\033[0m";
-     pthread_mutex_lock(&mutex);
-     while (!status) {
-       pthread_cond_wait(&cond, &mutex);
-     }
-     pthread_mutex_unlock(&mutex);
      getline(std::cin, str);
      size_t pos = 0;
      if (!(pos = splict(str, pos, ' ', cmd))) {
@@ -84,9 +82,10 @@
        continue;
      }
      switch (HashFunc(cmd.c_str())) {
-       case HashCompile("sf"):
-       case HashCompile("seefriend"):
+       case HashCompile("vf"):
+       case HashCompile("viewfriend"):
        {
+         std::lock_guard<std::mutex> locker(lock);
          show_all_friend();
          break;
        }
@@ -101,6 +100,7 @@
            std::cout << "error : 格式错误, 没有参数" << std::endl;
            break;
          }
+         std::lock_guard<std::mutex> locker(lock);
          add_friend(sockfd, args);
          break;
        }
@@ -115,6 +115,7 @@
            std::cout << "error : 格式错误, 没有参数" << std::endl;
            break;
          }
+         std::lock_guard<std::mutex> locker(lock);
          remove_friend(sockfd, args);
          break;
        }
@@ -127,6 +128,7 @@
            break;
          }
          private_chat(sockfd, arg);
+         break;
        }
        case HashCompile("gc"):
        case HashCompile("group"):
@@ -137,15 +139,25 @@
            break;
          }
          public_chat(sockfd, arg);
+         break;
        }
+       case HashCompile("vm"):
+       case HashCompile("viewmesg"):
+       {
+         std::lock_guard<std::mutex> locker(lock);
+         request_message_deal(sockfd);
+         break;
+       }
+       case HashCompile("h"):
        case HashCompile("help"):
        {
          help();
          break;
        }
+       case HashCompile("q"):
        case HashCompile("quit"):
        {
-         quit();
+         quit(sockfd);
          break;
        }
        case HashCompile("\n"):
@@ -161,38 +173,60 @@
 
  }
 
- void* receiv_message_thread(void* arg)
+ void receiv_message_thread(int arg)
  {
-   Socket sockfd = *((Socket*)arg);
+   Socket sockfd = arg;
    char rbuf[KBufSize];
    while (true) {
      memset(rbuf, 0, KBufSize);
      if (recv(sockfd, rbuf, KBufSize, 0) < 0) {
-       quit();
+       exit(-1);
      }
      Message mesg;
      memcpy(&mesg, rbuf, sizeof(mesg));
      switch(mesg.flags) {
        case AddFriend:
        {
+         std::lock_guard<std::mutex> locker(lock);
          std::cout << "\n         您收到一条来自" << mesg.sender.user_name << "的好友申请"
-                   << "time : " << mesg.time;
-         messages.push_back(mesg);
+                   << " time : " << mesg.time;
+         request_friend.push_back(mesg);
+         break;
+       }
+       case DelFriend:
+       {
+         std::lock_guard<std::mutex> locker(lock);
          break;
        }
        case PrivateChat:
        {
+         std::lock_guard<std::mutex> locker(lock);
          std::cout << "\n         您收到一条来自" << mesg.sender.user_name << "的消息"
-                   << "time : " << mesg.time;
+                   << " time : " << mesg.time;
          messages.push_back(mesg);
          break;
        }
        case PublicChat:
        {
+         std::lock_guard<std::mutex> locker(lock);
          std::cout << "\n         您收到一条来自" << mesg.sender.user_name << "的群消息"
-                   << "time : " << mesg.time;
+                   << " time : " << mesg.time;
          messages.push_back(mesg);
          break;
+       }
+       case Agree:
+       {
+         std::lock_guard<std::mutex> locker(lock);
+         std::cout << "\n         " << mesg.sender.user_name << "同意了您的好友请求"
+                   << " time : " << mesg.time;
+         my_user_info.friends.push_back(mesg.sender);
+         break;
+       }
+       case Refuse:
+       {
+         std::cout << "\n         " << mesg.sender.user_name << "拒绝了您的好友请求"
+                   << " time : " << mesg.time;
+          break;
        }
        default:
        {
@@ -203,10 +237,23 @@
    }
  }
 
- static void quit()
+ static void quit(Socket sockfd)
  {
+   Message flags_mesg;
+   memset(&flags_mesg, 0, sizeof(flags_mesg));
+   flags_mesg.flags = Quit;
+   flags_mesg.receiver = my_user_info.user;
+   char buf[KBufSize];
+   memset(buf, 0, KBufSize);
 
+   memcpy(buf, &flags_mesg, sizeof(flags_mesg));
+   if (send(sockfd, buf, KBufSize, 0) < 0) {
+     std::cout << "send error" << std::endl;
+     exit(-1);
+   }
+   exit(1);
  }
+
 
  static bool login(Socket sockfd)
  {
@@ -270,6 +317,7 @@
    }
    else {
      RegisterSigin flags_mesg;
+     memset(&flags_mesg, 0, sizeof(flags_mesg));
      flags_mesg.flags = Quit;
      char buf[KBufSize];
      memset(buf, 0, KBufSize);
@@ -345,7 +393,9 @@ static void show_main_menu()
   printf("\n");
   printf("              |<-     群组聊天( 'gc' or 'group' )         ->| \n");
   printf("\n");
-  printf("              |<-     查看消息( 'vm' or 'viewmesg' )         ->| \n");
+  printf("              |<-     查看消息( 'vm' or 'viewmesg' )      ->| \n");
+  printf("\n");
+  printf("              |<-     好友申请( 'rf' or 'request' )       ->| \n");
   printf("\n");
   printf("              |<-     退出登录( 'q' or 'quit')            ->| \n\033[0m");
   printf("\n");
@@ -353,7 +403,14 @@ static void show_main_menu()
 
 static void show_all_friend()
 {
-  printf("sf");
+  std::cout << "        您的好友： \n" << std::endl;
+  for (auto fr : my_user_info.friends) {
+    printf("            %s\n", fr.user_name);
+  }
+ std::cout << "        您的群组： \n" << std::endl;
+  for (auto gr : my_user_info.groups) {
+    printf("            %s\n", gr.group_name);
+  }
 }
 
 static bool add_friend(Socket sockfd, const std::vector<std::string>& args)
@@ -372,7 +429,7 @@ static bool add_friend(Socket sockfd, const std::vector<std::string>& args)
     memcpy(mesg.time, t, strlen(t));
     memcpy(sbuf, &mesg, sizeof(mesg));
     if (send(sockfd, sbuf, KBufSize, 0) < 0)
-      quit();
+      exit(0);
   }
 
   return true;
@@ -391,7 +448,7 @@ static bool remove_friend(Socket sockfd, const std::vector<std::string>& args)
     memcpy(mesg.time, t, strlen(t));
     memcpy(sbuf, &mesg, sizeof(mesg));
     if (send(sockfd, sbuf, strlen(sbuf), 0) < 0)
-      quit();
+      exit(0);
   }
   return true;
 }
@@ -407,26 +464,94 @@ static bool public_chat(Socket sockfd, const std::string& arg)
 
 static void view_message()
 {
+  for (auto it = messages.rbegin(); it != messages.rend(); ++it)
+    std::cout << "\t\t\t\t" << it->sender.user_name << " : "<<
+              it->data << "\t\t" << it->time << std::endl;
+}
+
+static void request_message_deal(Socket sockfd)
+{
+  if (request_friend.empty()) {
+    return ;
+  }
+  for (auto r : request_friend) {
+    std::cout  << "     "<< r.sender.user_name << " 请求添加你为好友" << "   时间："
+              << r.time << std::endl;
+  }
+  while (true) {
+    std::cout << "      好友名 + [yes/no] : ";
+    std::string str;
+    std::string username;
+    std::string reply;
+    getline(std::cin, str);
+    int pos = 0;
+    if ( !(pos = splict(str, pos, ' ', username)) || !(pos = splict(str, pos, ' ', reply))) {
+        std::cout << "    格式错误" << std::endl;
+        continue;
+    }
+    std::cout << reply << std::endl;
+
+
+    Message mesg;
+    char sbuf[KBufSize];
+    memset(&mesg, 0, sizeof(mesg));
+    if (reply == "yes") {
+      mesg.flags = Agree;
+      my_user_info.friends.push_back(User(username.c_str()));
+    }
+    else if (reply == "no"){
+      mesg.flags = Refuse;
+    }
+    else {
+      std::cout << "    格式错误" << std::endl;
+      continue;
+    }
+    mesg.sender = my_user_info.user;
+    mesg.receiver = User(username.c_str());
+    memcpy(mesg.data, reply.c_str(), reply.size());
+    char* t = my_time();
+    memcpy(mesg.time, t, strlen(t));
+    memcpy(sbuf, &mesg, sizeof(mesg));
+    if (send(sockfd, sbuf, KBufSize, 0) < 0)
+      exit(0);
+    break;
+
+
+  }
 
 }
 
 static void help()
 {
-
+  printf("                - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - \n");
+  printf("               \033[31m| 查看好友( vf  or viewfriend)                           \n");
+  printf("               | \n");
+  printf("               | 添加好友( af friend(好友名，可以支持多个) or add friend ) \n");
+  printf("               | \n");
+  printf("               | 删除好友( rf friendname or remove friendname )         \n");
+  printf("               | \n");
+  printf("               | 私人聊天( pc friendname or private friendname )        \n");
+  printf("               | \n");
+  printf("               | 群组聊天( gc groupname or group groupname)          \n");
+  printf("               | \n");
+  printf("               | 查看消息( vm  or viewmesg )          \n");
+  printf("               | \n");
+  printf("               | 退出登录( q or quit)             \n\033[0m");
+  printf("                 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - \n");
 }
 
 int splict(const std::string& s, size_t pos, char c, std::string& result)
 {
   auto pos_first = s.find_first_not_of(c, pos);
   if (pos_first == std::string::npos)
-  return 0;
+    return 0;
   auto pos_finish = s.find_first_of(c, pos_first);
   if (pos_finish == std::string::npos) {
     result =  s.substr(pos_first, s.size());
     return s.size();
   }
   else {
-    result = s.substr(pos_first, pos_finish);
+    result = s.substr(pos_first, pos_finish - pos_first);
     return pos_finish;
   }
 

@@ -1,9 +1,9 @@
-@Author: YangGuang <sunshine>
-@Date:   2018-04-16T11:49:46+08:00
-@Email:  guang334419520@126.com
-@Filename: CMakeLists.txt
-@Last modified by:   sunshine
-@Last modified time: 2018-04-16T18:51:42+08:00
+#Author: YangGuang <sunshine>
+#Date:   2018-04-16T11:49:46+08:00
+#Email:  guang334419520@126.com
+#Filename: CMakeLists.txt
+#Last modified by:   sunshine
+#Last modified time: 2018-04-16T18:51:42+08:00
 
 
 
@@ -17,6 +17,8 @@ project(GuangQServer)
 set(SRC server.cpp)
 #利用SRC生成一个可执行文件
 add_executable(${PROJECT_NAME} ${SRC})
+#支持C++11
+add_definitions(-std=c++11)
 
 if(__linux__)
     message("linux system")
