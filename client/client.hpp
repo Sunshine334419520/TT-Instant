@@ -4,7 +4,7 @@
  * @Email:  guang334419520@126.com
  * @Filename: client.hpp
  * @Last modified by:   sunshine
- * @Last modified time: 2018-05-05T16:40:53+08:00
+ * @Last modified time: 2018-05-06T16:17:39+08:00
  */
 
 #ifndef __CLIENT_HPP
@@ -92,8 +92,21 @@ struct User {
   User(const char* s) {
     strcpy(user_name, s);
   }
+  User(const User& u) {
+    strcpy(user_name, u.user_name);
+  }
+  User& operator=(const User& u) {
+    if (&u != this)
+      strcpy(user_name, u.user_name);
+    return *this;
+  }
   User() { }
 };
+
+inline bool operator==(const User& x, const User& y)
+{
+  return strcmp(x.user_name, y.user_name) == 0;
+}
 /* 群组结构 */
 struct Group {
   char group_name[KGroupName];
@@ -106,6 +119,16 @@ struct Users {
   char password[KUserPassMax];
   std::vector<User> friends;      // 好友
   std::vector<Group> groups;      // 群组
+
+  Users() { }
+  Users(const Users& u) {
+
+    memcpy(user.user_name, u.user.user_name, strlen(u.user.user_name));
+    memcpy(password, u.password, strlen(u.password));
+    friends = u.friends;
+    groups = u.groups;
+
+  }
 };
 
 /* 消息结构体 */
@@ -130,8 +153,8 @@ static bool register_account(Socket sockfd);
 static void show_all_friend();
 static bool add_friend(Socket, const std::vector<std::string>&);
 static bool remove_friend(Socket, const std::vector<std::string>&);
-static bool private_chat(Socket, const std::string&);
-static bool public_chat(Socket, const std::string&);
+static bool private_chat(Socket, const std::string&, const std::string&);
+static bool public_chat(Socket, const std::string&, const std::string&);
 static void view_message();
 static void help();
 static void quit(Socket sockfd);

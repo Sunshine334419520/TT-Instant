@@ -4,7 +4,7 @@
  * @Email:  guang334419520@126.com
  * @Filename: server.cpp
  * @Last modified by:   sunshine
- * @Last modified time: 2018-05-05T17:57:17+08:00
+ * @Last modified time: 2018-05-06T17:25:00+08:00
  */
 
 #include <iostream>
@@ -76,6 +76,14 @@ struct User {
   User(const char* s) {
     strcpy(user_name, s);
   }
+  User(const User& u) {
+    strcpy(user_name, u.user_name);
+  }
+  User& operator=(const User& u) {
+    if (&u != this)
+      strcpy(user_name, u.user_name);
+    return *this;
+  }
   User() {}
 };
 bool operator<(const User&x, const User& y) {
@@ -105,6 +113,15 @@ struct Users {
   char password[KUserPassMax];
   std::vector<User> friends;      // 好友
   std::vector<Group> groups;      // 群组
+  Users() { }
+  Users(const Users& u) {
+
+    memcpy(user.user_name, u.user.user_name, strlen(u.user.user_name));
+    memcpy(password, u.password, strlen(u.password));
+    friends = u.friends;
+    groups = u.groups;
+
+  }
 };
 
 
@@ -248,11 +265,11 @@ void private_chat(const Message& mesg)
   // 寻找对应的账号，发送数据
   int i;
   for (i = 0; i < FD_SETSIZE; ++i) {
-    if (memcmp(mesg.sender.user_name, client[i].name, KUserNameMax) == 0) {
-      if (send(client[i].fd, &mesg, strlen((char*)&mesg), 0) < 0)
+    if (strcmp(mesg.sender.user_name, client[i].name) == 0) {
+      if (send(client[i].fd, &mesg, sizeof(mesg), 0) < 0)
         error_deal("send error");
       else
-        return ;
+        break;
     }
   }
 
@@ -429,10 +446,26 @@ bool sign_in(const RegisterSigin& regist_info, int i)
     memcpy(sbuf, &sig_mesg, sizeof(sig_mesg));
     if (send(client[i].fd, sbuf, KBufSize, 0) < 0)
       error_deal("error send");
-    Users user = users_info[client[i].name];
+    Users cur = users_info[client[i].name];
+    Users user;
+    user.user = cur.user;
+    memcpy(user.password, cur.password,
+            strlen(cur.password));
     memset(sbuf, 0, KBufSize);
     memcpy(sbuf, &user, sizeof(user));
     if (send(client[i].fd, sbuf, KBufSize, 0) != KBufSize)
+      error_deal("error send");
+
+    for (auto f : cur.friends) {
+      if (send(client[i].fd, f.user_name, strlen(f.user_name), 0) < 0)
+        error_deal("error send");
+      usleep(100);
+    }
+
+    usleep(100);
+    char end_mesg[] = "END";
+
+    if (send(client[i].fd, end_mesg, strlen(end_mesg), 0) < 0)
       error_deal("error send");
     return true;
   }

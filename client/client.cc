@@ -4,7 +4,7 @@
  * @Email:  guang334419520@126.com
  * @Filename: client.cpp
  * @Last modified by:   sunshine
- * @Last modified time: 2018-05-05T17:46:20+08:00
+ * @Last modified time: 2018-05-06T17:20:13+08:00
  */
 
 
@@ -15,6 +15,7 @@
  #include <fstream>
  #include <thread>
  #include <condition_variable>
+ #include <algorithm>
  #include "client.hpp"
  #include "Hash.hpp"
 
@@ -122,23 +123,37 @@
        case HashCompile("pc"):
        case HashCompile("private"):
        {
-         std::string arg;
-         if ( !(splict(str, pos, ' ', arg))) {
+         std::string arg;           //发送人
+         std::string mesg_data;     //消息内容
+         if ( !(pos = splict(str, pos, ' ', arg))) {
            std::cout << "error : 格式错误, 没有参数" << std::endl;
            break;
          }
-         private_chat(sockfd, arg);
+         if ( !(splict(str, pos, ' ', mesg_data))) {
+           std::cout << "error : 格式错误, 没有参数" << std::endl;
+           break;
+         }
+         std::lock_guard<std::mutex> locker(lock);
+         if (!private_chat(sockfd, arg, mesg_data) )
+          std::cout << "        您没有这个好友!" << std::endl;
          break;
        }
        case HashCompile("gc"):
        case HashCompile("group"):
        {
          std::string arg;
-         if ( !(splict(str, pos, ' ', arg))) {
+         std::string mesg_data;
+         if ( !(pos = splict(str, pos, ' ', arg))) {
            std::cout << "error : 格式错误, 没有参数" << std::endl;
            break;
          }
-         public_chat(sockfd, arg);
+         if ( !(splict(str, pos, ' ', mesg_data))) {
+           std::cout << "error : 格式错误, 没有参数" << std::endl;
+           break;
+         }
+         std::lock_guard<std::mutex> locker(lock);
+         if (!public_chat(sockfd, arg, mesg_data))
+          std::cout << "        您没有这个群组！" << std::endl;
          break;
        }
        case HashCompile("vm"):
@@ -201,16 +216,16 @@
        case PrivateChat:
        {
          std::lock_guard<std::mutex> locker(lock);
-         std::cout << "\n         您收到一条来自" << mesg.sender.user_name << "的消息"
-                   << " time : " << mesg.time;
+         std::cout << "\n         " << mesg.sender.user_name << " : "
+                   << mesg.data << " time : " << mesg.time;
          messages.push_back(mesg);
          break;
        }
        case PublicChat:
        {
          std::lock_guard<std::mutex> locker(lock);
-         std::cout << "\n         您收到一条来自" << mesg.sender.user_name << "的群消息"
-                   << " time : " << mesg.time;
+         std::cout << "\n         " << mesg.sender.user_name << " : "
+                   << mesg.data << " time : " << mesg.time;
          messages.push_back(mesg);
          break;
        }
@@ -296,11 +311,23 @@
      }
      memcpy(&flags_mesg, buf, sizeof(flags_mesg));
      if (flags_mesg.flags == Succees) {
-       if (recv(sockfd, (char*)&my_user_info, sizeof(Users), 0) < 0) {
+       memset(buf, 0, KBufSize);
+       memset(&my_user_info, 0, sizeof(my_user_info));
+       if (recv(sockfd, buf, KBufSize, 0) < 0) {
          std::cout << "recv error" << std::endl;
          exit(-1);
        }
-       std::cout << my_user_info.user.user_name << std::endl;
+       memcpy(&my_user_info, buf, sizeof(my_user_info));
+       memset(buf, 0, KBufSize);
+
+       while (recv(sockfd, buf, KBufSize, 0)) {
+         if (strcmp(buf, "END") == 0)
+          break;
+         else {
+           my_user_info.friends.push_back(User(buf));
+           memset(buf, 0, KBufSize);
+         }
+       }
        return true;
      }
      else if (flags_mesg.flags == AccountError) {
@@ -453,11 +480,31 @@ static bool remove_friend(Socket sockfd, const std::vector<std::string>& args)
   return true;
 }
 
-static bool private_chat(Socket sockfd, const std::string& arg)
+static bool private_chat(Socket sockfd, const std::string& sender,
+                         const std::string& mesg_data)
 {
+  auto it = find(my_user_info.friends.begin(),
+                 my_user_info.friends.end(),User(sender.c_str()));
+  if (it == my_user_info.friends.end())
+    return false;
+  Message mesg;
+  char sbuf[KBufSize];
+  memset(sbuf, 0, KBufSize);
+  memset(&mesg, 0, sizeof(mesg));
+  mesg.flags = PrivateChat;
+  memcpy(mesg.data, mesg_data.c_str(), mesg_data.size());
+  char *t = my_time();
+  memcpy(mesg.time, t, strlen(t));
+  mesg.receiver = my_user_info.user;
+  mesg.sender = User(sender.c_str());
+  memcpy(sbuf, &mesg, sizeof(mesg));
+  if (send(sockfd, sbuf, strlen(sbuf), 0) < 0)
+    exit(0);
+
   return true;
 }
-static bool public_chat(Socket sockfd, const std::string& arg)
+static bool public_chat(Socket sockfd, const std::string& sender,
+                        const std::string& mesg_data)
 {
   return true;
 }
